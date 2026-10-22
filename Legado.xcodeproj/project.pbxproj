@@ -10,6 +10,36 @@
 	<string>54</string>
 	<key>objects</key>
 	<dict>
+		<key>BB02AA0000000000000001A1</key>
+		<dict>
+			<key>isa</key>
+			<string>XCRemoteSwiftPackageReference</string>
+			<key>repositoryURL</key>
+			<string>https://github.com/tid-kijyun/Kanna.git</string>
+			<key>requirement</key>
+			<dict>
+				<key>kind</key>
+				<string>exactVersion</string>
+				<key>version</key>
+				<string>6.1.0</string>
+			</dict>
+		</dict>
+		<key>BB02AA0000000000000002A1</key>
+		<dict>
+			<key>isa</key>
+			<string>XCSwiftPackageProductDependency</string>
+			<key>package</key>
+			<string>BB02AA0000000000000001A1</string>
+			<key>productName</key>
+			<string>Kanna</string>
+		</dict>
+		<key>BB02AA0000000000000003A1</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>productRef</key>
+			<string>BB02AA0000000000000002A1</string>
+		</dict>
 		<key>B1C0DE000000000000000001</key>
 		<dict>
 			<key>fileRef</key>
@@ -671,6 +701,7 @@
 			<key>packageProductDependencies</key>
 			<array>
 				<string>18F2053E418685EEAF8FF6A6</string>
+				<string>BB02AA0000000000000002A1</string>
 				<string>0194F438E6D24FA0D7FF4315</string>
 			</array>
 			<key>productName</key>
@@ -829,6 +860,7 @@
 			<key>packageReferences</key>
 			<array>
 				<string>D7BF30D010DE644D9F654B1B</string>
+				<string>BB02AA0000000000000001A1</string>
 				<string>73473E053742E4A3C9B15D15</string>
 			</array>
 			<key>productRefGroup</key>
@@ -1377,6 +1409,7 @@
 			<key>files</key>
 			<array>
 				<string>56A0F6E7B159B88C9BE3A1DD</string>
+				<string>BB02AA0000000000000003A1</string>
 				<string>7B54E4C3682E2D192F748519</string>
 				<string>BB01AA0000000000000002A2</string>
 			</array>
