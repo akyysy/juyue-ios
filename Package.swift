@@ -17,14 +17,17 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.6.0"),
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.16")
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.16"),
+        // XPath 真解析：SwiftSoup 不支持 XPath，Kanna 走 libxml2
+        .package(url: "https://github.com/tid-kijyun/Kanna.git", exact: "6.1.0")
     ],
     targets: [
         .target(
             name: "LegadoCore",
             dependencies: [
                 "SwiftSoup",
-                "ZIPFoundation"
+                "ZIPFoundation",
+                "Kanna"
             ]),
         .target(
             name: "LegadoApp",

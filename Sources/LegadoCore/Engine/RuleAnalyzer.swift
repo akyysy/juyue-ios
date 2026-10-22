@@ -1,5 +1,6 @@
 import Foundation
 import SwiftSoup
+import Kanna
 
 public class RuleAnalyzer {
     public let content: Any
@@ -350,22 +351,27 @@ public class RuleAnalyzer {
             }
 
             for step in steps {
-                var selector: String?
                 switch step.type {
                 case .css(let rawSelector):
-                    selector = rawSelector
-                case .xpath(let rawXPath):
-                    // 引擎只有 CSS，能翻译的 XPath 先转成 CSS，翻不动的保持返回空
-                    selector = XPathToCSS.css(from: rawXPath)
-                default:
-                    selector = nil
-                }
-                if let selector {
                     var next: [Element] = []
                     for el in currentElements {
-                        next.append(contentsOf: selectElements(from: el, selector: selector))
+                        next.append(contentsOf: selectElements(from: el, selector: rawSelector))
                     }
                     currentElements = next
+                case .xpath(let rawXPath):
+                    // 先用 libxml2 真正执行 XPath；取不到时再用 XPath→CSS 子集翻译兜底
+                    var next: [Element] = []
+                    for el in currentElements {
+                        next.append(contentsOf: selectByXPath(from: el, xpath: rawXPath))
+                    }
+                    if next.isEmpty, let cssSelector = XPathToCSS.css(from: rawXPath) {
+                        for el in currentElements {
+                            next.append(contentsOf: selectElements(from: el, selector: cssSelector))
+                        }
+                    }
+                    currentElements = next
+                default:
+                    continue
                 }
             }
             if !currentElements.isEmpty {
@@ -397,6 +403,49 @@ public class RuleAnalyzer {
             return selected.array()
         }
         return []
+    }
+
+    /// 用 libxml2（Kanna）执行真正的 XPath。
+    ///
+    /// SwiftSoup 本身没有 XPath，原来的实现只能把「标签 + 单个谓词 + 位置」翻成 CSS，
+    /// 多谓词、`text()`、`following-sibling::` 轴、`last()`、并集 `|` 这些真实书源里
+    /// 常见的写法一律取不到元素（实测 140 条 XPath 规则里有 40 条属于这类）。
+    /// 这里把当前节点的 HTML 交给 Kanna 再跑一遍 XPath，命中后转回 SwiftSoup 的 Element，
+    /// 让后续 `@text` / `@href` / 链式选择器照旧工作。
+    private func selectByXPath(from element: Element, xpath: String) -> [Element] {
+        let trimmed = xpath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let html = (try? element.outerHtml()) ?? ""
+        guard !html.isEmpty, let document = try? Kanna.HTML(html: html, encoding: .utf8) else {
+            return []
+        }
+
+        var results: [Element] = []
+        for node in document.xpath(trimmed) {
+            if let fragment = node.toHTML, !fragment.isEmpty {
+                if let converted = Self.parseFragmentElement(fragment) {
+                    results.append(converted)
+                }
+            } else if let text = node.text, !text.isEmpty {
+                // `text()` / `@text` 命中文本节点时没有 HTML，包一层 span 让它仍是 Element
+                if let converted = Self.parseFragmentElement("<span>\(Self.escapeHTML(text))</span>") {
+                    results.append(converted)
+                }
+            }
+        }
+        return results
+    }
+
+    private static func parseFragmentElement(_ html: String) -> Element? {
+        guard let document = try? SwiftSoup.parseBodyFragment(html),
+              let body = document.body() else { return nil }
+        return body.children().first()
+    }
+
+    private static func escapeHTML(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     /// 把选择器尾部的 `.N` / `.-N` 下标拆出来，例如 `a.0` -> ("a", 0)、`.bookname.0` -> (".bookname", 0)。
@@ -435,7 +484,8 @@ public class RuleAnalyzer {
         var elements: [Element] = [element]
 
         for step in steps {
-            if case .css(let selector) = step.type {
+            switch step.type {
+            case .css(let selector):
                 var next: [Element] = []
                 for el in elements {
                     let found = selectElements(from: el, selector: selector)
@@ -448,6 +498,21 @@ public class RuleAnalyzer {
                     }
                 }
                 elements = next
+            case .xpath(let xpath):
+                // 和 getElements 里的链式选择保持一致：先用 libxml2 真跑 XPath，
+                // 取不到再用 XPath→CSS 子集翻译兜底。getString 走的就是这条路径。
+                var next: [Element] = []
+                for el in elements {
+                    next.append(contentsOf: selectByXPath(from: el, xpath: xpath))
+                }
+                if next.isEmpty, let cssSelector = XPathToCSS.css(from: xpath) {
+                    for el in elements {
+                        next.append(contentsOf: selectElements(from: el, selector: cssSelector))
+                    }
+                }
+                if !next.isEmpty { elements = next }
+            default:
+                break
             }
         }
 
