@@ -536,7 +536,7 @@
 				<key>INFOPLIST_FILE</key>
 				<string>Sources/LegadoApp/Info.plist</string>
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
-				<string>橘阅</string>
+				<string>阅读</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents</key>
@@ -1606,7 +1606,7 @@
 				<key>INFOPLIST_FILE</key>
 				<string>Sources/LegadoApp/Info.plist</string>
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
-				<string>橘阅</string>
+				<string>阅读</string>
 				<key>INFOPLIST_KEY_UIApplicationSceneManifest_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents</key>
