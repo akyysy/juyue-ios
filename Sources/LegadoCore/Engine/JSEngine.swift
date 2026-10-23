@@ -25,6 +25,16 @@ import CommonCrypto
     func getCookie(_ url: String) -> String
     func refreshExplore()
     func hexDecodeToString(_ hex: String) -> String
+    // 脚本常用的字符串/摘要工具：语料里 java.encodeURI 出现 14 次，digestHex/HMac* 各若干
+    func encodeURI(_ str: String) -> String
+    func digestHex(_ algorithm: String, _ str: String) -> String
+    func HMacHex(_ algorithm: String, _ key: String, _ data: String) -> String
+    func HMacBase64(_ algorithm: String, _ key: String, _ data: String) -> String
+    func base64DecodeToByteArray(_ str: String) -> [Int]
+    // 脚本里就地解析 HTML 片段（安卓那边是 org.jsoup 的 getElement/getElements）
+    func getElement(_ html: String, _ rule: String) -> String
+    func getElements(_ html: String, _ rule: String) -> [String]
+    func getStringList(_ rule: String) -> [String]
     // Rhino 的 Java 互操作适配，聚合源依赖这几个：
     func base64EncodeBytes(_ bytes: JSValue) -> String
     func sleepMs(_ ms: JSValue)
@@ -259,6 +269,68 @@ public final class ScriptBrowser {
     /// flags=2 对应 Android 的 NO_WRAP，即标准 base64，不带换行。
     public func base64EncodeBytes(_ bytes: JSValue) -> String {
         Data(Self.byteArray(from: bytes)).base64EncodedString()
+    }
+
+    // MARK: - 脚本里的字符串 / 摘要 / HTML 解析工具
+
+    /// `java.encodeURI(s)`：保留 URL 分隔符，只转义空格、中文等。
+    public func encodeURI(_ str: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.insert(charactersIn: "-_.!~*'()")
+        return str.addingPercentEncoding(withAllowedCharacters: allowed) ?? str
+    }
+
+    public func digestHex(_ algorithm: String, _ str: String) -> String {
+        CryptoUtils.digestHex(algorithm, str)
+    }
+
+    public func HMacHex(_ algorithm: String, _ key: String, _ data: String) -> String {
+        CryptoUtils.hmacHex(algorithm, key: key, data: data)
+    }
+
+    public func HMacBase64(_ algorithm: String, _ key: String, _ data: String) -> String {
+        CryptoUtils.hmacBase64(algorithm, key: key, data: data)
+    }
+
+    /// `java.base64DecodeToByteArray`：脚本拿它拼二进制 body。
+    public func base64DecodeToByteArray(_ str: String) -> [Int] {
+        guard let data = Data(base64Encoded: str.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return []
+        }
+        return data.map { Int($0) }
+    }
+
+    /// `java.getElement(html, rule)`：安卓是 `AnalyzeRule(html).getElement(rule)` 的 outerHtml。
+    public func getElement(_ html: String, _ rule: String) -> String {
+        getElements(html, rule).first ?? ""
+    }
+
+    public func getElements(_ html: String, _ rule: String) -> [String] {
+        guard !html.isEmpty, !rule.isEmpty else { return [] }
+        let analyzer = RuleAnalyzer(content: html, baseUrl: nil, bookSource: nil, jsEngine: nil)
+        return analyzer.getElements(rule).map { item in
+            if let element = item as? Element {
+                return (try? element.outerHtml()) ?? "\(element)"
+            }
+            return "\(item)"
+        }
+    }
+
+    /// `java.getStringList(rule)`：对当前脚本的 `result` 再套一条规则，返回列表。
+    public func getStringList(_ rule: String) -> [String] {
+        guard let ctx = jsContext,
+              let res = ctx.objectForKeyedSubscript("result" as NSString),
+              !res.isUndefined, !res.isNull, !rule.isEmpty else {
+            return []
+        }
+        let content: Any
+        if res.isObject, let dict = res.toDictionary() {
+            content = dict
+        } else {
+            content = res.toString() ?? ""
+        }
+        return RuleAnalyzer(content: content, baseUrl: nil, bookSource: nil, jsEngine: nil)
+            .getStringList(rule)
     }
 
     /// `Packages.java.lang.Thread.sleep(ms)`，脚本用它等待异步、限速。
