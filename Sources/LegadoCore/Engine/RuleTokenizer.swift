@@ -48,6 +48,17 @@ public class RuleTokenizer {
             trimmed = beforeTag
         }
 
+        // 安卓的显式类型前缀：`@css:` / `@xpath:` / `@json:`。
+        // 语料里 `@css:.bookname@text` 很常见，不剥前缀的话 `@` 拆分会被前缀里的
+        // 那个 `@` 带偏，整条规则取不到元素。
+        var forcedRootType: String?
+        for prefix in ["@css:", "@xpath:", "@json:"] where trimmed.hasPrefix(prefix) {
+            forcedRootType = prefix
+            trimmed = String(trimmed.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            break
+        }
+
         // Split by '@'
         // XPath 规则里 @ 是属性谓词的一部分（例如 //div[@id="x"]），
         // 不能按 @ 拆。只有形如 "...@text" 的尾部属性提取才拆。
@@ -80,9 +91,15 @@ public class RuleTokenizer {
             let isAttr = knownAttributes.contains(lower) || lower.starts(with: "attr(")
 
             if index == 0 {
-                // Determine root type
+                // Determine root type（显式前缀优先于内容猜测）
                 if isAttr {
                     steps.append(RuleStep(type: .attribute(lower)))
+                } else if forcedRootType == "@css:" {
+                    steps.append(RuleStep(type: .css(normalizeSelector(token))))
+                } else if forcedRootType == "@xpath:" {
+                    steps.append(RuleStep(type: .xpath(token)))
+                } else if forcedRootType == "@json:" {
+                    steps.append(RuleStep(type: .jsonPath(token)))
                 } else if token.starts(with: "$.") || token.starts(with: "$[") {
                     steps.append(RuleStep(type: .jsonPath(token)))
                 } else if token.starts(with: "//") || token.starts(with: "/") {

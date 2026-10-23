@@ -459,6 +459,13 @@ public final class ScriptBrowser {
         return value
     }
 
+    /// 供规则层的 `@get:{key}` 读取脚本 `java.put` 写进来的值。
+    static func storedValue(_ key: String) -> String? {
+        Self.storeLock.lock()
+        defer { Self.storeLock.unlock() }
+        return Self.sharedStore[key]
+    }
+
     public func md5Encode(_ str: String) -> String {
         return CryptoUtils.md5(str)
     }
@@ -846,20 +853,47 @@ public class JSEngine {
         return val?.toObject()
     }
 
+    /// 把规则里 `@get:{key}` 换成脚本 `java.put` 存进去的值。
+    ///
+    /// 安卓 Legado 的 `@get:` 读的是书源级变量（`source.variable`），用来串联两次请求：
+    /// 第一次请求把 id 存下来，第二次 URL 里 `@get:{cid}` 直接引用。语料里能见到
+    /// `.../Html/@get:{cid}/@get:{bid}/{{$.id}}.html` 这种整条路径都是变量的写法。
+    /// 取不到就换成空串，和安卓行为一致（会请求失败，但不会把字面量 `@get:{cid}` 发出去）。
+    public static func expandSourceVariables(_ text: String) -> String {
+        guard text.contains("@get:{") else { return text }
+        guard let regex = try? NSRegularExpression(pattern: "@get:\\{([^{}]*)\\}", options: []) else {
+            return text
+        }
+        let nsString = text as NSString
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        guard !matches.isEmpty else { return text }
+
+        var result = text
+        for match in matches.reversed() {
+            let key = nsString.substring(with: match.range(at: 1))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = JavaShim.storedValue(key) ?? ""
+            result = (result as NSString).replacingCharacters(in: match.range, with: value)
+        }
+        return result
+    }
+
     /// Evaluates template strings containing `{{ ... }}`
     public func renderTemplate(_ text: String, variables: [String: Any] = [:]) -> String {
         for (k, v) in variables {
             context.setObject(JSEngine.jsSafeValue(v), forKeyedSubscript: k as NSString)
         }
 
-        var result = text
+        // `@get:{key}` 先展开，否则 `{{@get:{key}}}` 会被当成 JS 表达式报语法错。
+        let source = JSEngine.expandSourceVariables(text)
+        var result = source
         let pattern = "\\{\\{(.*?)\\}\\}"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
-            return text
+            return source
         }
 
-        let nsString = text as NSString
-        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        let nsString = source as NSString
+        let matches = regex.matches(in: source, options: [], range: NSRange(location: 0, length: nsString.length))
 
         for match in matches.reversed() {
             let fullRange = match.range

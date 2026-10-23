@@ -28,7 +28,7 @@ jobs:
         run: swift package resolve
 
       - name: Rule engine tests (hard gate)
-        run: swift test --filter "(LegacyIndexedSelectorTests|XPathRuleTests)"
+        run: swift test --filter "(LegacyIndexedSelectorTests|XPathRuleTests|RuleSyntaxTests)"
 
       - name: Full test suite (soft gate)
         continue-on-error: true

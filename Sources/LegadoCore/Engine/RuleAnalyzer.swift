@@ -75,9 +75,11 @@ public class RuleAnalyzer {
 
     /// Evaluates a rule string and returns a single string result
     public func getString(_ rule: String?, isUrl: Bool = false) -> String {
-        guard let rule = rule?.trimmingCharacters(in: .whitespacesAndNewlines), !rule.isEmpty else {
+        guard let rawRule = rule?.trimmingCharacters(in: .whitespacesAndNewlines), !rawRule.isEmpty else {
             return ""
         }
+        // `@get:{key}` 在整条规则的入口就展开，URL、正文、目录都走这里。
+        let rule = JSEngine.expandSourceVariables(rawRule)
 
         // 安卓语法的 @json: 明确取 JSONPath；和 $.xxx 等价，但优先级更高
         if rule.hasPrefix("@json:"), let json = parsedJson {
@@ -132,10 +134,9 @@ public class RuleAnalyzer {
         }
 
         // Handle fallback operator: rule1 || rule2
-        if rule.contains("||") {
-            let options = rule.components(separatedBy: "||")
+        if let options = Self.splitTopLevel(rule, by: "||") {
             for option in options {
-                let res = getString(option.trimmingCharacters(in: .whitespacesAndNewlines), isUrl: isUrl)
+                let res = getString(option, isUrl: isUrl)
                 if !res.isEmpty {
                     return res
                 }
@@ -144,9 +145,8 @@ public class RuleAnalyzer {
         }
 
         // Handle concatenation operator: rule1 && rule2
-        if rule.contains("&&") {
-            let segments = rule.components(separatedBy: "&&")
-            let combined = segments.map { getString($0.trimmingCharacters(in: .whitespacesAndNewlines), isUrl: isUrl) }
+        if let segments = Self.splitTopLevel(rule, by: "&&") {
+            let combined = segments.map { getString($0, isUrl: isUrl) }
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
             return combined
@@ -156,10 +156,89 @@ public class RuleAnalyzer {
         return list.first ?? ""
     }
 
+    // MARK: - 顶层运算符切分
+
+    /// 按 `&&` / `||` / `%%` 在**顶层**切分规则：引号内、括号内、`{{ }}` 内的都不切。
+    ///
+    /// 安卓 RuleAnalyzer 也是同一套 depth/quote 扫描，所以 `@css:a[title="x||y"]`、
+    /// `{{page==1?"a&&b":"c"}}` 这类写法不能被粗暴 split（原来的
+    /// `components(separatedBy:)` 会把它们切碎）。
+    /// 没有该运算符时返回 nil，让调用方继续走后面的分支。
+    static func splitTopLevel(_ rule: String, by op: String) -> [String]? {
+        guard !op.isEmpty else { return nil }
+        let chars = Array(rule)
+        var parts: [String] = []
+        var current = ""
+        current.reserveCapacity(rule.count)
+        var depth = 0
+        var quote: Character?
+        var escaped = false
+        var i = 0
+        while i < chars.count {
+            let ch = chars[i]
+            if escaped {
+                current.append(ch); escaped = false; i += 1; continue
+            }
+            if ch == "\\" {
+                current.append(ch); escaped = true; i += 1; continue
+            }
+            if let q = quote {
+                current.append(ch)
+                if ch == q { quote = nil }
+                i += 1
+                continue
+            }
+            if ch == "\"" || ch == "'" {
+                quote = ch; current.append(ch); i += 1; continue
+            }
+            if ch == "(" || ch == "[" || ch == "{" {
+                depth += 1; current.append(ch); i += 1; continue
+            }
+            if ch == ")" || ch == "]" || ch == "}" {
+                depth = max(0, depth - 1); current.append(ch); i += 1; continue
+            }
+            if depth == 0, i + op.count <= chars.count, String(chars[i..<(i + op.count)]) == op {
+                parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+                current = ""
+                i += op.count
+                continue
+            }
+            current.append(ch)
+            i += 1
+        }
+        guard !parts.isEmpty else { return nil }
+        parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
+        return parts
+    }
+
+    /// `%%` 的语义：几段规则各自出列表，再按下标交叉合并（第 0 段第 0 个、第 1 段第 0 个…）。
+    private func mergeListsByPercent(_ rule: String, isUrl: Bool) -> [String]? {
+        guard let parts = Self.splitTopLevel(rule, by: "%%"), parts.count > 1 else { return nil }
+        let lists = parts.map { getStringList($0, isUrl: isUrl) }
+        var merged: [String] = []
+        let maxCount = lists.map { $0.count }.max() ?? 0
+        for index in 0..<maxCount {
+            for list in lists where index < list.count {
+                merged.append(list[index])
+            }
+        }
+        return merged
+    }
+
     /// Evaluates a rule string and returns a list of string results
     public func getStringList(_ rule: String?, isUrl: Bool = false) -> [String] {
-        guard let rule = rule?.trimmingCharacters(in: .whitespacesAndNewlines), !rule.isEmpty else {
+        guard let rawRule = rule?.trimmingCharacters(in: .whitespacesAndNewlines), !rawRule.isEmpty else {
             return []
+        }
+        let rule = JSEngine.expandSourceVariables(rawRule)
+
+        // `%%` 交叉合并要在 tokenize 之前处理；`||` / `&&` 交给 getString 的优先级逻辑。
+        if let merged = mergeListsByPercent(rule, isUrl: isUrl) {
+            return merged
+        }
+        if Self.splitTopLevel(rule, by: "||") != nil || Self.splitTopLevel(rule, by: "&&") != nil {
+            let single = getString(rule, isUrl: isUrl)
+            return single.isEmpty ? [] : [single]
         }
 
         // If pure JS: @js:script or <js>...</js>
